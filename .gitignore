@@ -35,3 +35,7 @@ override.tf.json
 # Ignore CLI configuration files
 .terraformrc
 terraform.rc
+
+# generated state files
+/state_files/*
+!/state_files/README_STATE_FILES.md
