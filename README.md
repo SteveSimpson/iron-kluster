@@ -30,11 +30,18 @@ export AWS_SECRET_ACCESS_KEY=...
 tf init
 tf apply
 
-cd ../../ansible
+ssh config.iron.lcsas.net
 ansible-playbook -i ../state_files/inventory.ini kube_install_base.yml
-ansible-playbook -i ../state_files/inventory.ini kube_install_control.yml
-ansible-playbook -i ../state_files/inventory.ini kube_install_worker.yml
+ansible-playbook -i ../state_files/inventory.ini kube_install_main.yml
+ansible-playbook -i ../state_files/inventory.ini kube_install_nodes.yml
+
+kubectl get nodes
 ```
+
+### HA Proxy and Keepalived
+
+I want to keep the work that I've done for now. I think this will be useful for the onsite cluster, although,
+I might just use k3s for that.
 
 ### Cleanup
 
@@ -47,11 +54,11 @@ To access these system from local add something like the following to your `~/.s
 
 ```ssh.config
 Host *.iron.lcsas.net
-    IdentityFile ~/src/ssimpson/iron-kluster/state_files/iron_id
+    IdentityFile ~/path/to/iron-kluster/state_files/iron_id
     IdentitiesOnly yes
     StrictHostKeyChecking yes
     User ubuntu
-    UserKnownHostsFile ~/src/ssimpson/iron-kluster/state_files/ssh_known_hosts
+    UserKnownHostsFile ~/path/to/iron-kluster/state_files/ssh_known_hosts
 ```
 
 ## Methods and Design Decisions

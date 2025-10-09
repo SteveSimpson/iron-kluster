@@ -1,6 +1,6 @@
 ---
 - name: Configure Join Commands on Master Node
-  hosts: kube-control-plane[0] # Target the first control plane node
+  hosts: kube_control_plane[0] # Target the first control plane node
   become: yes
   tasks:
     - name: Retrieve Join Command
@@ -20,26 +20,26 @@
         control_cert_key: "{{ control_cert_key_raw.stdout_lines[2] }}"
 
 - name: Join Control Nodes
-  hosts: kube-control-plane[1:] # Target the other control plane nodes
+  hosts: kube_control_plane[1:] # Target the other control plane nodes
   become: yes
   tasks:
-    - name: Enable TCP port 6443 (On Master) is able to connect from Worker
-      wait_for: "host={{ groups['kube-control-plane'][0] }} port=6443 timeout=1"
+    - name: Connect to TCP port 6443 (On Master) from Control
+      wait_for: "host={{ groups['kube_control_plane'][0] }} port=6443 timeout=1"
     - name: Join control plane to cluster
-      shell: "{{ hostvars[groups['kube-control-plane'][0]].join_command }} --control-plane --certificate-key {{ hostvars[groups['kube-control-plane'][0]].control_cert_key }} >> control_joined.log"
+      shell: "{{ hostvars[groups['kube_control_plane'][0]].join_command }} --control-plane --certificate-key {{ hostvars[groups['kube_control_plane'][0]].control_cert_key }} >> control_joined.log"
       args:
         chdir: /home/{{ ansible_user }}
         creates: control_joined.log
 
 - name: Join Worker Nodes
-  hosts: kube-worker-nodes
+  hosts: kube_worker_nodes
   become: yes
   tasks:
-    - name: Enable TCP port 6443 (On Master) is able to connect from Worker
-      wait_for: "host={{ groups['kube-control-plane'][0] }} port=6443 timeout=1"
+    - name: Connect to TCP port 6443 (On Master) from Worker
+      wait_for: "host={{ groups['kube_control_plane'][0] }} port=6443 timeout=1"
 
     - name: Join worker to cluster
-      shell: "{{ hostvars[groups['kube-control-plane'][0]].join_command }} >> worker_joined.log"
+      shell: "{{ hostvars[groups['kube_control_plane'][0]].join_command }} >> worker_joined.log"
       args:
         chdir: /home/{{ ansible_user }}
         creates: worker_joined.log

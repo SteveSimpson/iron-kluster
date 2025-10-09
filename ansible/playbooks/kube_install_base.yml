@@ -14,10 +14,6 @@
         - gnupg-agent
         - software-properties-common
         - containerd
-        - net-tools    # TODO: Remove after testing
-        - jq           # TODO: Remove after testing
-        - iputils-ping # TODO: Remove after testing
-        - vim          # TODO: Remove after testing
 
     - name: Disable swap
       command: swapoff -a
