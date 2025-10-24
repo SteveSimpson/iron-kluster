@@ -31,17 +31,30 @@ tf init
 tf apply
 
 ssh config.iron.lcsas.net
-ansible-playbook -i ../state_files/inventory.ini kube_install_base.yml
-ansible-playbook -i ../state_files/inventory.ini kube_install_main.yml
-ansible-playbook -i ../state_files/inventory.ini kube_install_nodes.yml
+ansible-playbook ansible/playbooks/kube_install_base.yml
+ansible-playbook ansible/playbooks/kube_install_main.yml
+ansible-playbook ansible/playbooks/kube_install_nodes.yml
 
 kubectl get nodes
+
 ```
+
+
 
 ### HA Proxy and Keepalived
 
 I want to keep the work that I've done for now. I think this will be useful for the onsite cluster, although,
 I might just use k3s for that.
+
+#### Warm Failover
+
+My assumption here is that the cloud providers AZs are stable and that a backup warm failover is plenty for my
+front end HA Proxy. This would suffice for almost all web sites and most data platfforms. If higher availability
+is needed, then a multimaster HA or multiregion solution, or just use the cloud providers LB (AWS ELB).
+
+#### EC2
+
+
 
 ### Cleanup
 
@@ -96,8 +109,6 @@ adding a 3rd zone / instance would be easy. - Once the multicloud environment is
 For this project `containerd` was selected. This was primrily or the native package on Ubuntu.
 CRI-O has a slightly smaller footprint, but requires installing additional apt repos.
 There did not seem to be enough of an advantage at this point to warrant the additional isntallation configuration and maintenance.
-
-
 
 ## Container Network Interface (CNI)
 

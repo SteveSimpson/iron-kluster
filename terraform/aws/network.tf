@@ -8,8 +8,8 @@ locals {
 
   # if you add an AZ here, also add it to the nlb.tf, line 5 and ec2_nodes.tf, local.aws_nodes
   AZs = {
-    "az1" = {name = var.az1, public = "11", control = "12", worker = "13"}
-    # "az2" = {name = var.az2, public = "21", control = "22", worker = "23"}
+    "az1" = { name = var.az1, public = "11", control = "12", worker = "13" }
+    "az2" = { name = var.az2, public = "21", control = "22", worker = "23" }
     # "az3" = {name = var.az3, public = "31", control = "32", worker = "33"}
   }
 }
@@ -34,7 +34,7 @@ resource "aws_internet_gateway" "iron_gw" {
 }
 
 resource "aws_subnet" "iron_public" {
-  for_each      = { for k, v in local.AZs : k => v }
+  for_each          = { for k, v in local.AZs : k => v }
   vpc_id            = aws_vpc.iron_vpc.id
   availability_zone = each.value.name
   cidr_block        = join(".", [local.subnet_prefix, each.value.public, local.subnet_postfix])
@@ -44,7 +44,7 @@ resource "aws_subnet" "iron_public" {
 }
 
 resource "aws_subnet" "iron_control" {
-  for_each      = { for k, v in local.AZs : k => v }
+  for_each          = { for k, v in local.AZs : k => v }
   vpc_id            = aws_vpc.iron_vpc.id
   availability_zone = each.value.name
   cidr_block        = join(".", [local.subnet_prefix, each.value.control, local.subnet_postfix])
@@ -54,7 +54,7 @@ resource "aws_subnet" "iron_control" {
 }
 
 resource "aws_subnet" "iron_worker" {
-  for_each      = { for k, v in local.AZs : k => v }
+  for_each          = { for k, v in local.AZs : k => v }
   vpc_id            = aws_vpc.iron_vpc.id
   availability_zone = each.value.name
   cidr_block        = join(".", [local.subnet_prefix, each.value.worker, local.subnet_postfix])
@@ -64,7 +64,7 @@ resource "aws_subnet" "iron_worker" {
 }
 
 resource "aws_eip" "iron_nat_ip" {
-  for_each      = { for k, v in local.AZs : k => v }
+  for_each = { for k, v in local.AZs : k => v }
   domain   = "vpc"
 
   tags = {
@@ -120,7 +120,7 @@ resource "aws_route_table" "private_routes" {
 }
 
 resource "aws_route_table_association" "public_routes_assoc" {
-  for_each = { for k, v in local.AZs : k => v }
+  for_each       = { for k, v in local.AZs : k => v }
   subnet_id      = aws_subnet.iron_public[each.key].id
   route_table_id = aws_route_table.public_routes.id
 }
@@ -213,6 +213,45 @@ resource "aws_security_group" "iron_worker" {
   }
 }
 
+resource "aws_security_group" "calico" {
+  name   = "K8s ports for Calico CNI"
+  vpc_id = aws_vpc.iron_vpc.id
+
+  # ip in ip
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = 4
+    cidr_blocks = local.internal_cidrs
+  }
+
+  # BGP
+  ingress {
+    from_port   = 179
+    to_port     = 179
+    protocol    = "tcp"
+    cidr_blocks = local.internal_cidrs
+  }
+
+  # vxlan
+  ingress {
+    from_port   = 4789
+    to_port     = 4789
+    protocol    = "udp"
+    cidr_blocks = local.internal_cidrs
+  }
+
+  # typhia
+  ingress {
+    from_port   = 5473
+    to_port     = 5473
+    protocol    = "tcp"
+    cidr_blocks = local.internal_cidrs
+  }
+
+
+}
+
 resource "aws_security_group" "iron_control" {
   name   = "K8s Control Ports"
   vpc_id = aws_vpc.iron_vpc.id
@@ -231,17 +270,11 @@ resource "aws_security_group" "iron_control" {
     cidr_blocks = local.internal_cidrs
   }
 
+
   ingress {
     from_port   = 2379
     to_port     = 2380
     protocol    = "tcp"
-    cidr_blocks = local.internal_cidrs
-  }
-
-  ingress {
-    from_port   = 4789
-    to_port     = 4789
-    protocol    = "udp"
     cidr_blocks = local.internal_cidrs
   }
 
@@ -262,6 +295,14 @@ resource "aws_security_group" "iron_control" {
   ingress {
     from_port   = 10250
     to_port     = 10250
+    protocol    = "tcp"
+    cidr_blocks = local.internal_cidrs
+  }
+
+  # etcd
+  ingress {
+    from_port   = 2379
+    to_port     = 2379
     protocol    = "tcp"
     cidr_blocks = local.internal_cidrs
   }

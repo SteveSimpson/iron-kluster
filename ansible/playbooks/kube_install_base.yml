@@ -1,6 +1,18 @@
 ---
 - hosts: all
   become: yes
+  handlers:
+    - name: Restart Service containerd
+      ansible.builtin.systemd:
+        name: containerd
+        state: restarted
+        enabled: yes
+    - name: Load Containerd kernel modules
+      ansible.builtin.command:
+        cmd: modprobe -a overlay br_netfilter
+    - name: Apply sysctl params without reboot
+      ansible.builtin.command:
+        cmd: sysctl --system
   tasks:
     - name: Update apt cache and install common packages
       apt:
@@ -15,8 +27,14 @@
         - software-properties-common
         - containerd
 
+    - name: Get swap state
+      shell: swapon --show
+      register: swap_state
+      changed_when: false # Prevent task from reporting a change
+
     - name: Disable swap
       command: swapoff -a
+      when: swap_state.stdout != ""
 
     - name: Containerd modules
       ansible.builtin.copy:
@@ -27,10 +45,7 @@
         mode: '0644'
         owner: root
         group: root
-
-    - name: Load Containerd modules
-      ansible.builtin.command:
-        cmd: modprobe -a overlay br_netfilter 
+      notify: Load Containerd kernel modules
 
     - name: Set required sysctl params for Kubernetes
       ansible.builtin.copy:
@@ -41,11 +56,8 @@
           net.bridge.bridge-nf-call-ip6tables = 1
         mode: '0644'
         owner: root
-        group: root 
-
-    - name: Apply sysctl params without reboot
-      ansible.builtin.command:
-        cmd: sysctl --system  
+        group: root
+      notify: Apply sysctl params without reboot
   
     - name: Add Configuration directory for containerd
       ansible.builtin.file: 
@@ -65,18 +77,14 @@
         path: /etc/containerd/config.toml
         regexp: "            SystemdCgroup = false"
         line:   "            SystemdCgroup = true"
+      notify: Restart Service containerd
 
     - name: Configuring Systemd cgroup driver for containerd
       lineinfile:
         path: /etc/containerd/config.toml
         regexp: '    sandbox_image = "registry\.k8s\.io/pause:.*"'   
         line:   '    sandbox_image = "registry.k8s.io/pause:3.10.1"'
-
-    - name: Restart and enable containerd service
-      ansible.builtin.systemd:
-        name: containerd
-        state: restarted
-        enabled: yes
+      notify: Restart Service containerd
 
     - name: Create Kubernetes install working directory
       ansible.builtin.file:

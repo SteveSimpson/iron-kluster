@@ -6,6 +6,7 @@
     - name: Retrieve Join Command
       shell: kubeadm token create --print-join-command
       register: join_command_raw
+      changed_when: false # Prevent task from reporting a change
 
     - name: Set Join Command
       set_fact:
@@ -14,6 +15,7 @@
     - name: Retrieve Control Certificate Key
       shell: kubeadm init phase upload-certs --upload-certs
       register: control_cert_key_raw
+      changed_when: false # Prevent task from reporting a change
 
     - name: Set Control Certificate Key
       set_fact:

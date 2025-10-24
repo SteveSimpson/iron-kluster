@@ -1,66 +1,16 @@
 ---
 - hosts: kube_control_plane[0] # Target the first control plane node
   become: yes
+  handlers:
+    - name: Restart and enable kubelet service
+      ansible.builtin.systemd:
+        name: kubelet
+        state: restarted
+        enabled: yes
+    - name: Pause for 15 seconds 
+      ansible.builtin.pause:
+        seconds: 15
   tasks:
-    # - name: Create config directory for haproxy on node
-    #   ansible.builtin.file:
-    #     path: /usr/local/etc/haproxy
-    #     state: directory
-    #     mode: '0755'
-    #     owner: root
-    #     group: root
-    # - name: Add haproxy config
-    #   ansible.builtin.copy:
-    #     src: ../../helm/kube_ha/etc/haproxy/haproxy.cfg
-    #     dest: /usr/local/etc/haproxy/haproxy.cfg
-    #     owner: root
-    #     group: root
-    #     mode: '0644'
-    # - name: Add haproxy manifest
-    #   ansible.builtin.copy:
-    #     src: ../../helm/kube_ha/haproxy.yaml
-    #     dest: /etc/kubernetes/manifests/haproxy.yaml
-    #     owner: root
-    #     group: root
-    #     mode: '0644'
-
-    # - name: Create config directory for keepalived on node
-    #   ansible.builtin.file:
-    #     path: /usr/local/etc/keepalived
-    #     state: directory
-    #     mode: '0755'
-    #     owner: root
-    #     group: root
-    # - name: Add keepalived config
-    #   ansible.builtin.copy:
-    #     src: ../../helm/kube_ha/etc/keepalived/keepalived.conf
-    #     dest: /usr/local/etc/keepalived/keepalived.conf
-    #     owner: root
-    #     group: root
-    #     mode: '0644'
-    # - name: Create a unique auth_string
-    #   ansible.builtin.set_fact:
-    #     auth_string: "{{ lookup('community.general.random_string', length=24, special=false) }}"
-    # - name: Fix the auth string in keepalived.conf
-    #     path: /usr/local/etc/keepalived/keepalived.conf
-    #     regexp: "CHANGE_ME"
-    #     replace: "{{ auth_string }}"
-    #     backup: no
-    # - name: Add keepalived check script
-    #   ansible.builtin.copy:
-    #     src: ../../helm/kube_ha/etc/keepalived/check_apiserver.sh
-    #     dest: /usr/local/etc/keepalived/check_apiserver.sh
-    #     owner: root
-    #     group: root
-    #     mode: '0755'
-    # - name: Add keepalived manifest
-    #   ansible.builtin.copy:
-    #     src: ../../helm/kube_ha/keepalived.yaml
-    #     dest: /etc/kubernetes/manifests/keepalived.yaml
-    #     owner: root
-    #     group: root
-    #     mode: '0644'
-
     - name: Create an Empty file for Kubeadm configuring
       copy:
         content: ""
@@ -96,6 +46,7 @@
       args:
         chdir: /home/{{ ansible_user }}
         creates: cluster_initialized.log
+      notify: Restart and enable kubelet service
 
     - name: Create Kubernetes config directory for ansible_user user
       ansible.builtin.file:
@@ -122,12 +73,6 @@
       loop:
         - python3-kubernetes
 
-    - name: Restart and enable kubelet service
-      ansible.builtin.systemd:
-        name: kubelet
-        state: restarted
-        enabled: yes
-
 - hosts: kube_control_plane[0] # Target the first control plane node
   become: no
   tasks:
@@ -138,12 +83,10 @@
       kubernetes.core.k8s:
         state: present
         src: https://raw.githubusercontent.com/projectcalico/calico/v3.30.3/manifests/tigera-operator.yaml
+      # so Calico CNI is available - not my favorite way of doing this, but simple and seems to work
+      notify: Pause for 15 seconds
 
-    # I don't really like doing this, but a little delay seems to be necessary
-    - name: Pause for 15 seconds so Calico CNI is available
-      ansible.builtin.pause:
-        seconds: 15
-
+    # TODO: track state so it doesn't change if ran a 2nd time
     - name: Apply Calico custom resources
       kubernetes.core.k8s:
         state: present
