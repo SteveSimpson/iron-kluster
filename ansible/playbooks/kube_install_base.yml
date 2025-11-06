@@ -1,5 +1,5 @@
 ---
-- hosts: all
+- hosts: kube_control_plane:kube_worker_nodes
   become: yes
   handlers:
     - name: Restart Service containerd

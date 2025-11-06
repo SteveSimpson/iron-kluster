@@ -8,10 +8,26 @@ locals {
 
   # if you add an AZ here, also add it to the nlb.tf, line 5 and ec2_nodes.tf, local.aws_nodes
   AZs = {
-    "az1" = { name = var.az1, public = "11", control = "12", worker = "13" }
-    "az2" = { name = var.az2, public = "21", control = "22", worker = "23" }
+    "az1" = { name = var.az1, public = "11", control = "12", worker = "13", haproxy = "14" }
+    "az2" = { name = var.az2, public = "21", control = "22", worker = "23", haproxy = "24" }
     # "az3" = {name = var.az3, public = "31", control = "32", worker = "33"}
   }
+
+  HAProxy_AZs = {
+    "az1" = { 
+      name = var.az1, 
+      public = "10.50.10.0/28", 
+      private = "10.50.10.16/28",
+    }
+    "az2" = { 
+      name = var.az2, 
+      public = "10.50.10.32/28", 
+      private = "10.50.10.48/28",
+    }
+  }
+
+  haproxy_private_subnet_ids = [for k, v in local.HAProxy_AZs : aws_subnet.iron_haproxy_private[k].id]
+  haproxy_public_subnet_ids = [for k, v in local.HAProxy_AZs : aws_subnet.iron_haproxxy_public[k].id]
 }
 
 resource "aws_vpc" "iron_vpc" {
@@ -54,12 +70,32 @@ resource "aws_subnet" "iron_control" {
 }
 
 resource "aws_subnet" "iron_worker" {
-  for_each          = { for k, v in local.AZs : k => v }
+  for_each          =  { for k, v in local.AZs : k => v }
   vpc_id            = aws_vpc.iron_vpc.id
   availability_zone = each.value.name
   cidr_block        = join(".", [local.subnet_prefix, each.value.worker, local.subnet_postfix])
   tags = {
     Name = "Iron Worker Net ${each.key}"
+  }
+}
+
+resource "aws_subnet" "iron_haproxy_private" {
+  for_each          = { for k, v in local.HAProxy_AZs : k => v  }
+  vpc_id            = aws_vpc.iron_vpc.id
+  availability_zone = each.value.name
+  cidr_block        = each.value.private
+  tags = {
+    Name = "Iron HAProxy Net ${each.key}"
+  }
+}
+
+resource "aws_subnet" "iron_haproxxy_public" {
+  for_each          = { for k, v in local.HAProxy_AZs : k => v }
+  vpc_id            = aws_vpc.iron_vpc.id
+  availability_zone = each.value.name
+  cidr_block        = each.value.public
+  tags = {
+    Name = "Iron HAProxy Public Net ${each.key}"
   }
 }
 
@@ -125,6 +161,12 @@ resource "aws_route_table_association" "public_routes_assoc" {
   route_table_id = aws_route_table.public_routes.id
 }
 
+resource "aws_route_table_association" "public_routes_assoc_haproxy" {
+  for_each       = { for k, v in local.HAProxy_AZs : k => v }
+  subnet_id      = aws_subnet.iron_haproxxy_public[each.key].id
+  route_table_id = aws_route_table.public_routes.id
+}
+
 resource "aws_route_table_association" "private_routes_assoc_control" {
   for_each = { for k, v in local.AZs : k => v }
 
@@ -139,185 +181,9 @@ resource "aws_route_table_association" "private_routes_assoc_worker" {
   route_table_id = aws_route_table.private_routes[each.key].id
 }
 
+resource "aws_route_table_association" "private_routes_assoc_haproxy" {
+  for_each = { for k, v in local.HAProxy_AZs : k => v }
 
-resource "aws_security_group" "iron_public" {
-  name   = "Public Access"
-  vpc_id = aws_vpc.iron_vpc.id
-
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = local.remote_cidrs
-  }
-
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = local.remote_cidrs
-  }
-
-  ingress {
-    from_port   = 6443
-    to_port     = 6443
-    protocol    = "tcp"
-    cidr_blocks = local.remote_cidrs
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = -1
-    cidr_blocks = local.all_cidrs
-  }
-}
-
-resource "aws_security_group" "iron_worker" {
-  name   = "K8s Worker Ports"
-  vpc_id = aws_vpc.iron_vpc.id
-
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = local.internal_cidrs
-  }
-
-  ingress {
-    from_port   = 4789
-    to_port     = 4789
-    protocol    = "udp"
-    cidr_blocks = local.internal_cidrs
-  }
-
-  ingress {
-    from_port   = 6379
-    to_port     = 6379
-    protocol    = "tcp"
-    cidr_blocks = local.internal_cidrs
-  }
-
-  ingress {
-    from_port   = 6443
-    to_port     = 6443
-    protocol    = "tcp"
-    cidr_blocks = local.internal_cidrs
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = -1
-    cidr_blocks = local.all_cidrs
-  }
-}
-
-resource "aws_security_group" "calico" {
-  name   = "K8s ports for Calico CNI"
-  vpc_id = aws_vpc.iron_vpc.id
-
-  # ip in ip
-  ingress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = 4
-    cidr_blocks = local.internal_cidrs
-  }
-
-  # BGP
-  ingress {
-    from_port   = 179
-    to_port     = 179
-    protocol    = "tcp"
-    cidr_blocks = local.internal_cidrs
-  }
-
-  # vxlan
-  ingress {
-    from_port   = 4789
-    to_port     = 4789
-    protocol    = "udp"
-    cidr_blocks = local.internal_cidrs
-  }
-
-  # typhia
-  ingress {
-    from_port   = 5473
-    to_port     = 5473
-    protocol    = "tcp"
-    cidr_blocks = local.internal_cidrs
-  }
-
-
-}
-
-resource "aws_security_group" "iron_control" {
-  name   = "K8s Control Ports"
-  vpc_id = aws_vpc.iron_vpc.id
-
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = local.internal_cidrs
-  }
-
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = local.internal_cidrs
-  }
-
-
-  ingress {
-    from_port   = 2379
-    to_port     = 2380
-    protocol    = "tcp"
-    cidr_blocks = local.internal_cidrs
-  }
-
-  ingress {
-    from_port   = 6379
-    to_port     = 6379
-    protocol    = "tcp"
-    cidr_blocks = local.internal_cidrs
-  }
-
-  ingress {
-    from_port   = 6443
-    to_port     = 6443
-    protocol    = "tcp"
-    cidr_blocks = local.remote_cidrs
-  }
-
-  ingress {
-    from_port   = 10250
-    to_port     = 10250
-    protocol    = "tcp"
-    cidr_blocks = local.internal_cidrs
-  }
-
-  # etcd
-  ingress {
-    from_port   = 2379
-    to_port     = 2379
-    protocol    = "tcp"
-    cidr_blocks = local.internal_cidrs
-  }
-
-  ingress {
-    from_port   = 30000
-    to_port     = 32767
-    protocol    = "tcp"
-    cidr_blocks = local.internal_cidrs
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = -1
-    cidr_blocks = local.all_cidrs
-  }
+  subnet_id      = aws_subnet.iron_haproxy_private[each.key].id
+  route_table_id = aws_route_table.private_routes[each.key].id
 }

@@ -4,15 +4,87 @@ locals {
   haproxy_internal_cidrs = ["10.50.0.0/16"] # internal network (2 AZs and subnets)
 }
 
-resource "aws_security_group" "haproxy_access" {
-  name   = "HA Proxy Remote Access SG"
-  vpc_id = aws_vpc.iron_vpc.id
+resource "aws_security_group" "haproxy_internal" {
+  name   = "HA Proxy Internal SG"
+  vpc_id = var.vpc_id
+
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = -1
+    cidr_blocks = local.haproxy_internal_cidrs
+  }
 
   ingress {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = local.haproxy_rc_cidrs
+    cidr_blocks = local.haproxy_internal_cidrs
+  }
+
+  # VRRP protocol
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = 112
+    cidr_blocks = local.haproxy_internal_cidrs
+  }
+
+  # Pings / ICMP
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "icmp"
+    cidr_blocks = local.haproxy_internal_cidrs
+  }
+
+  egress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = local.haproxy_all_cidrs
+  }
+
+  egress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = local.haproxy_all_cidrs
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = -1
+    cidr_blocks = local.haproxy_internal_cidrs
+  }
+}
+
+resource "aws_security_group" "haproxy_access" {
+  name   = "HA Proxy Remote Access SG"
+  vpc_id = var.vpc_id
+
+  # Pings / ICMP
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "icmp"
+    cidr_blocks = local.haproxy_internal_cidrs
+  }
+
+  # VRRP protocol
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = 112
+    cidr_blocks = local.haproxy_internal_cidrs
+  }
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = local.haproxy_internal_cidrs
   }
 
   ingress {
@@ -23,17 +95,38 @@ resource "aws_security_group" "haproxy_access" {
   }
 
   ingress {
-    from_port   = 433
+    from_port   = 443
     to_port     = 443
     protocol    = "tcp"
     cidr_blocks = local.haproxy_all_cidrs
   }
 
   ingress {
-    from_port   = 6433
+    from_port   = 6443
     to_port     = 6443
     protocol    = "tcp"
     cidr_blocks = local.haproxy_rc_cidrs
+  }
+
+  ingress {
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = local.haproxy_all_cidrs
+  }
+
+  egress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = local.haproxy_all_cidrs
+  }
+
+  egress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = local.haproxy_all_cidrs
   }
 
   egress {
@@ -74,16 +167,23 @@ data "aws_iam_policy_document" "haproxy_ec2_document" {
   statement {
     sid = "eipChange"
     actions = [
+      "ec2:AssignPrivateIpAddresses",
       "ec2:AssociateAddress",
       "ec2:DisassociateAddress",
-      "ec2:AssignPrivateIpAddresses",
+      "ec2:ModifyNetworkInterfaceAttribute",
       "ec2:UnassignPrivateIpAddresses",
+      "s3:GetObject",
+      "s3:ListBucket",
+      "s3:GetObjectAcl",
+      "s3:GetObjectTagging",
+      "ssm:UpdateInstanceInformation"
     ]
-    resources = [
-      aws_instance.ec2_haproxy["ha1"].arn,
-      aws_instance.ec2_haproxy["ha2"].arn,
-      aws_eip.haproxy_vip.arn,
-    ]
+    resources = concat(
+      [for instance in aws_instance.ec2_haproxy : instance.arn],
+      # [for nic in aws_network_interface.public : nic.arn],
+      [aws_eip.haproxy_vip.arn],
+      [aws_s3_bucket.haproxy_bucket.arn, "${aws_s3_bucket.haproxy_bucket.arn}/*"],
+    )
   }
 }
 

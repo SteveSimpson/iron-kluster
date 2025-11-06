@@ -1,100 +1,100 @@
-locals {
-  aws_haproxy_nodes = {
-    "ha1" = {
-      subnet_id = aws_subnet.iron_public["az1"].id
-      tags = {
-        Name        = "haproxy1"
-        Description = "iron_haproxy_primary"
-        Zone        = "AZ 1"
-      }
-    }
-    "ha2" = {
-      subnet_id = aws_subnet.iron_public["az2"].id
-      tags = {
-        Name        = "haproxy2"
-        Description = "iron_haproxy_primary"
-        Zone        = "AZ 2"
-      }
-    }
-  }
-  haproxy_instance_type  = "t4g.micro"
-  haproxy_ami            = "ami-06e880a88a1e3ebd9" # ubuntu 24.04 ARM 64bit
-  haproxy_state_file_dir = "../../state_files"
-}
+data "aws_region" "current" {}
 
 resource "aws_instance" "ec2_haproxy" {
-  for_each = local.aws_haproxy_nodes
+  count = length(var.public_subnet_ids)
 
-  ami                         = local.haproxy_ami
-  key_name                    = aws_key_pair.haproxy_key.key_name
+  ami                         = var.ami_id
+  key_name                    = var.ssh_key_name
   associate_public_ip_address = true
   iam_instance_profile        = aws_iam_instance_profile.haproxy_instance_profile.name
-  instance_type               = local.haproxy_instance_type
+  instance_type               = var.instance_type
   vpc_security_group_ids      = [aws_security_group.haproxy_access.id]
-  subnet_id                   = each.value.subnet_id
+  subnet_id                   = var.private_subnet_ids[count.index]
   user_data_replace_on_change = true
 
-  # most of the configuration will be done by ansible
-  # pass the information required from TF to each VM in a script that can be sourced
-  user_data = <<EOT
+  # Interesting mix of TF & Ansible
+  # TF has all the information to create the configs, but implemnting the configs needs to be done after setup
+  # Ansible will be used to setup the services. It provides better debugging and idempotency.
+  # The user_data script will do the minimum to setup the host and pass facts to ansible
+  user_data = <<-EOT
     #!/bin/bash
-    sudo apt-get update
-    sudo apt-get install -y
-    mkdir -p /etc/iron_haproxy
-    chmod 755 /etc/iron_haproxy
-    echo '# DO NOT EDIT - MAGANGED BY TF, ec2_haproyx.tf' > /etc/iron_haproxy/tf_values.sh
+    #
+    hostnamectl set-hostname "haproxy-${count.index + 1}"
+
+    apt update
+    apt install -y s3fs
+  
+    mkdir -p /mnt/iron_haproxy
+    mkdir -p /etc/iron_haproxy/facts
+    chmod 755 /mnt/iron_haproxy /etc/iron_haproxy /etc/iron_haproxy/facts
+
+    # mount s3 bucket using iam role so that it is available for ansible to use
+    echo "${local.haproxy_s3_bucket_name} /mnt/iron_haproxy fuse.s3fs _netdev,allow_other,iam_role=iron_haproxy_role 0 0" >> /etc/fstab
+
+    echo "Files in this directory are managed by terraform, haproyx_ec2.tf." > /etc/iron_haproxy/facts/README.txt
+    echo "Do not edit them directly." >> /etc/iron_haproxy/facts/README.txt
+    echo "" >> /etc/iron_haproxy/facts/README.txt
+    echo "They are to be slurped from Ansible to be used as facts during playbook runs." >> /etc/iron_haproxy/facts/README.txt
+    echo "" >> /etc/iron_haproxy/facts/README.txt
+
+    echo "${count.index}" > /etc/iron_haproxy/facts/haproxy_index
+    echo "${aws_eip.haproxy_vip.public_ip}" > /etc/iron_haproxy/facts/haproxy_vip4
+
+    echo "${data.aws_region.current.region}" > /etc/iron_haproxy/facts/aws_region
+    chnod 644 /etc/iron_haproxy/facts/*
+
+    echo '# DO NOT EDIT - MAGANGED BY TF, haproyx_ec2.tf' > /etc/iron_haproxy/tf_values.sh
     echo "# Created on: $(date)" >> /etc/iron_haproxy/tf_values.sh
     echo "" >> /etc/iron_haproxy/tf_values.sh
     echo 'HAPROXY_VIP=${aws_eip.haproxy_vip.public_ip}' >> /etc/iron_haproxy/tf_values.sh
     echo 'HAPROXY_ALLOCATION_ID=${aws_eip.haproxy_vip.allocation_id}' >> /etc/iron_haproxy/tf_values.sh
-    echo "" >> /etc/iron_haproxy/tf_values.sh
-    EOT
 
-  tags = merge(each.value.tags, {
+    echo 'HAPROXY_INSTANCE_INDEX=${count.index}' >> /etc/iron_haproxy/tf_values.sh
+    echo 'AWS_REGION=${data.aws_region.current.region}' >> /etc/iron_haproxy/tf_values.sh
+    echo "" >> /etc/iron_haproxy/tf_values.sh
+    chmod 600 /etc/iron_haproxy/tf_values.sh
+
+    # Run updates here to ensure latest security patches are applied
+    apt -y upgrade
+    mount -a
+
+    reboot
+  EOT
+
+  tags = {
     Cluster  = "iron_haproxy"
     Function = "haproxy"
-  })
+    Name     = "iron_haproxy-${count.index + 1}"
+  }
 }
 
-#create ssh keys
-resource "tls_private_key" "haproxy_ssh_private_key" {
-  algorithm = "ED25519"
-}
+# resource "aws_network_interface" "public" {
+#   count = length(var.public_subnet_ids)
 
-# for now store backup copies of keys in state_files directory, for prod use AWS Secrets Manager
-resource "local_file" "haproxy_ssh_private_key" {
-  content         = tls_private_key.haproxy_ssh_private_key.private_key_openssh
-  filename        = join("/", [local.haproxy_state_file_dir, "haproxy_id"])
-  file_permission = "0600"
-}
+#   subnet_id       = var.public_subnet_ids[count.index]
+#   security_groups = [aws_security_group.haproxy_access.id]
 
-resource "local_file" "haproxy_ssh_pubkey" {
-  content         = tls_private_key.haproxy_ssh_private_key.public_key_openssh
-  filename        = join(".", [local_file.haproxy_ssh_private_key.filename, "pub"])
-  file_permission = "0644"
-}
+#   tags = {
+#     Name = "iron_haproxy_public_${count.index + 1}"
+#   }
+  
+# }
 
-resource "aws_key_pair" "haproxy_key" {
-  key_name   = "iron-haproxy-key"
-  public_key = tls_private_key.haproxy_ssh_private_key.public_key_openssh
-}
+# resource "aws_network_interface_attachment" "public_attachment" {
+#   count = length(var.public_subnet_ids)
+#   instance_id          = aws_instance.ec2_haproxy[count.index].id
+#   network_interface_id = aws_network_interface.public[count.index].id
+#   device_index         = 1
+# }
 
 resource "aws_eip" "haproxy_vip" {
   domain = "vpc"
+
+  tags = {
+    Name = "iron_haproxy_vip"
+  }
 }
 
-output "primary_haproxy_ip" {
-  value = aws_instance.ec2_haproxy["ha1"].public_ip
-}
-
-output "secondary_haproxy_ip" {
-  value = aws_instance.ec2_haproxy["ha2"].public_ip
-}
-
-output "haproxy_vip" {
-  value = aws_eip.haproxy_vip.public_ip
-}
-
-output "haproxy_vip_id" {
-  value = aws_eip.haproxy_vip.allocation_id
-}
+# 42 echo "${aws_network_interface.public[count.index].id}" > /etc/iron_haproxy/facts/haproxy_interface_id
+# 42  
+# 55  echo 'HAPROXY_INTERFACE_ID=${aws_network_interface.public[count.index].id}' >> /etc/iron_haproxy/tf_values.sh

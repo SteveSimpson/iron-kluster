@@ -8,6 +8,13 @@ resource "aws_instance" "ec2_k8s_nodes" {
   subnet_id              = each.value.subnet_id
   instance_type          = each.value.instance_type
   vpc_security_group_ids = each.value.security_groups
+
+  user_data = <<-EOT
+    #!/bin/bash
+    #
+    hostnamectl set-hostname "${each.key}"
+  EOT
+
   root_block_device {
     volume_type           = "gp2"
     volume_size           = "16"

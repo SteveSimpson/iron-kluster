@@ -7,6 +7,7 @@ metadata:
 spec:
   # Configures Calico networking.
   calicoNetwork:
+    bgp: Enabled
     ipPools:
     - name: default-ipv4-ippool
       blockSize: 26

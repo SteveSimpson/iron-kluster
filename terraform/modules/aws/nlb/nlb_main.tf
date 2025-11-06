@@ -1,3 +1,7 @@
+locals {
+
+}
+
 resource "aws_lb" "kube_api" {
   name                             = "kube-nlb"
   internal                         = false
@@ -18,14 +22,16 @@ resource "aws_lb_target_group" "kube_api" {
 resource "aws_lb_target_group_attachment" "kube_api" {
   # covert a list of instance objects to a map with instance ID as the key, and an instance
   # object as the value.
-  for_each = toset(var.control_node_ids)
-  # {
+  
+  # for_each  {
   #   for k, v in var.k8s_nodes : k => v
   #   if v.tags["Function"] == "control"
   # }
+  # for_each = toset(var.control_node_ids)
+  count          = var.control_node_count
 
   target_group_arn = aws_lb_target_group.kube_api.arn
-  target_id        = each.value
+  target_id        = var.control_node_ids[count.index]
   port             = 6443
 }
 

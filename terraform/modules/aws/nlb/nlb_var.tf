@@ -21,6 +21,12 @@ variable "dns_zone_id" {
 #   }))
 # }
 
+variable "control_node_count" {
+  description = "Count of control nodes"
+  type        = number
+  default     = 0
+} 
+
 variable "control_node_ids" {
   description = "List of control node instance IDs"
   type        = list(string)

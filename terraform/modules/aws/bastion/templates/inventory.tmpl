@@ -16,6 +16,17 @@ ${worker_hosts}
 # (no worker hosts)
 %{ endif }
 
+[haproxy_nodes]
+%{ if length(trimspace(haproxy_hosts)) > 0 }
+${haproxy_hosts}
+%{ else }
+# (no haproxy hosts)
+%{ endif }
+
 [all:vars]
 ansible_user=${ansible_user}
 ansible_ssh_private_key_file=${ansible_key}
+web_server_ip_1=192.168.1.10
+web_server_ip_2=192.168.1.11
+haproxy_stats_user=stats
+haproxy_stats_password=${haproxy_stats_password}

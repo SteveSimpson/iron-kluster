@@ -34,6 +34,10 @@ variable "bastion_subnet_id" {
   
 }
 
+variable "haproxy_instances" {
+  description = "HA Proxy EC2 instances"
+}
+
 variable "helm_dir" {
   description = "Directory path to the Helm Files"
   type        = string
