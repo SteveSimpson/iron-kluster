@@ -1,0 +1,26 @@
+router id {{ ansible_default_ipv4.address }};
+log syslog all;
+
+# k8s nodes
+{% for address in k8s_ip_list %}
+protocol bgp {
+   local {{ ansible_default_ipv4.address }} as 65000;
+   neighbor {{ address }} as 65000;
+   direct;
+   import filter {
+      if ( net ~ [ {{ k8s_net }}{26,26} ] ) then accept;
+   };
+  export none;
+}
+
+{% endfor %}
+# Inserts routes into the kernel routing table
+protocol kernel {
+   scan time 60;
+   export all;
+}
+
+# Gets information about network interfaces from the kernel
+protocol device {
+   scan time 60;
+}
