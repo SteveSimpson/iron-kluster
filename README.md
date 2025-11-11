@@ -153,3 +153,12 @@ Calico with istio is tho solution selected. This will allow a phased approach to
 - https://github.com/flannel-io/flannel
 - https://www.suse.com/c/rancher_blog/comparing-kubernetes-cni-providers-flannel-calico-canal-and-weave/
 - https://kubernetes.io/docs/concepts/cluster-administration/addons/
+
+
+# Tabs to research
+
+- https://k3s.io/
+- https://www.haproxy.com/documentation/kubernetes-ingress/community/installation/external-mode-on-premises/
+- https://docs.tigera.io/calico/latest/about/kubernetes-training/about-kubernetes-ingress
+- https://argo-cd.readthedocs.io/en/stable/user-guide/helm/
+- https://github.com/haproxytech/kubernetes-ingress
