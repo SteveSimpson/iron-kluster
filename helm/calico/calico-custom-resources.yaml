@@ -11,7 +11,7 @@ spec:
     ipPools:
     - name: default-ipv4-ippool
       blockSize: 26
-      cidr: 10.64.0.0/16
+      cidr: 10.64.0.0/16 # match inventory.tmpl
       encapsulation: VXLANCrossSubnet
       natOutgoing: Enabled
       nodeSelector: all()

@@ -131,17 +131,32 @@ module "iron_ansible_key" {
   })
 }
 
-# module "iron_aws_k8s" {
-#   source = "../modules/aws/k8s"
+module "iron_aws_k8s" {
+  source = "../modules/aws/k8s"
 
-#   k8s_nodes           = local.aws_nodes
-#   ami_id              = var.ami_id
-#   dns_private_zone_id = aws_route53_zone.private_iron.zone_id
-#   dns_tld             = var.dns_tld
-#   ssh_key_name        = module.iron_k8s_key.aws_key_pair_name
-#   tags                = local.tags
+  k8s_nodes           = local.aws_nodes
+  ami_id              = var.ami_id
+  dns_private_zone_id = aws_route53_zone.private_iron.zone_id
+  dns_tld             = var.dns_tld
+  ssh_key_name        = module.iron_k8s_key.aws_key_pair_name
+  tags                = local.tags
 
-# }
+}
+
+module "iron_nlb" {
+  source = "../modules/aws/nlb"
+
+  dns_hostname           = "api"
+  dns_zone_id            = aws_route53_zone.iron.zone_id
+  control_node_ids       = module.iron_aws_k8s.k8s_contol_node_ids
+  control_node_count     = local.control_node_count
+  vpc_id                 = aws_vpc.iron_vpc.id
+  k8s_public_subnet_list = [for subnet in aws_subnet.iron_public : subnet.id]
+  k8s_security_groups    = [aws_security_group.iron_public.id]
+
+  depends_on = [ module.iron_aws_k8s]
+}
+
 
 module "iron_bastion" {
   source = "../modules/aws/bastion"
@@ -171,31 +186,16 @@ module "iron_bastion" {
   ]
 }
 
-# module "iron_nlb" {
-#   source = "../modules/aws/nlb"
-
-#   dns_hostname           = "api"
-#   dns_zone_id            = aws_route53_zone.iron.zone_id
-#   control_node_ids       = module.iron_aws_k8s.k8s_contol_node_ids
-#   control_node_count     = local.control_node_count
-#   vpc_id                 = aws_vpc.iron_vpc.id
-#   k8s_public_subnet_list = [for subnet in aws_subnet.iron_public : subnet.id]
-#   k8s_security_groups    = [aws_security_group.iron_public.id]
-
-#   depends_on = [ module.iron_aws_k8s]
-# }
-
 module "haproxy" {
   source = "../modules/aws/haproxy"
 
   dns_private_zone_id = aws_route53_zone.private_iron.zone_id
-  dns_public_zone_id  = aws_route53_zone.iron.zone_id
+  # dns_public_zone_id  = aws_route53_zone.iron.zone_id
+  dns_public_zone_id  = data.aws_route53_zone.tld.id
   private_subnet_ids  = local.haproxy_public_subnet_ids
   public_subnet_ids   = local.haproxy_public_subnet_ids
   
   # ssh_key_name      = local.iron_haproxy_key_name
   ssh_key_name = module.iron_k8s_key.aws_key_pair_name
-  vpc_id            = aws_vpc.iron_vpc.id
+  vpc_id       = aws_vpc.iron_vpc.id
 }
-
-

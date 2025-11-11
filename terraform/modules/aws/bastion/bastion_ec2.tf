@@ -2,9 +2,10 @@
 # It will have the ansible inventory and ssh keys to manage the k8s cluster
 # It will also have the ansible playbooks to bootstrap the k8s cluster
 locals {
-  user_dir      = join("/", ["", "home", var.ami_user])
-  ssh_dir       = join("/", [local.user_dir, ".ssh"])
-  playbooks_dir = join("/", [local.user_dir, "ansible", "playbooks"])
+  user_dir     = join("/", ["", "home", var.ami_user])
+  ssh_dir      = join("/", [local.user_dir, ".ssh"])
+  playbook_dir = join("/", [local.user_dir, "ansible", "playbooks"])
+  etc_iron_dir = join("/", ["", "etc", "iron"])
 
   ansible_config_file = join("/", [local.user_dir, "ansible.cfg"])
 
@@ -12,12 +13,11 @@ locals {
   inventroy_path = join("/", [local.user_dir, "ansible", "inventory.ini"])
 
   k8s_ssh_key_path   = join("/", [local.ssh_dir, "iron_id"])
-
   conn_ssh_timeout   = "2m"
   conn_type          = "ssh"
   ansible_ssh_config = "~/.ssh/config"
 
-  haproxy_instances = join("\n", [for k, v in var.haproxy_instances : format("%s\t%s", v.id, v.private_ip)])
+  haproxy_ip_addresses = join("\n", [for k, v in var.haproxy_instances : format("%s", v.private_ip)])
   haproxy_names = join("\n", [for k, v in var.haproxy_instances : format("haproxy-%s.iron-private.lcsas.net", (k + 1))])
 }
 
@@ -39,6 +39,9 @@ resource "aws_instance" "ec2_ansible" {
       "mkdir -p ~/ansible",
       "mkdir -p ~/.ssh",
       "chmod 700 ~/.ssh",
+      "sudo mkdir -p ${local.etc_iron_dir}",
+      "sudo chown ${var.ami_user} ${local.etc_iron_dir}",
+      "sudo chmod 755 ${local.etc_iron_dir}",
     ]
 
     connection {
@@ -79,7 +82,7 @@ resource "aws_instance" "ec2_ansible" {
 
   provisioner "file" { # k8s nodes list
     content     = local.k8s_nodes_list
-    destination = join("/", [local.user_dir, local.k8s_nodes_list_filename])
+    destination = join("/", [local.etc_iron_dir, local.k8s_nodes_list_filename])
 
     connection {
       type        = local.conn_type
@@ -92,7 +95,20 @@ resource "aws_instance" "ec2_ansible" {
 
   provisioner "file" { # k8s nodes list
     content     = local.haproxy_names
-    destination = join("/", [local.user_dir, "haproxy_nodes.txt"])
+    destination = join("/", [local.etc_iron_dir, "haproxy_nodes.txt"])
+
+    connection {
+      type        = local.conn_type
+      user        = var.ami_user
+      private_key = var.bastion_ssh_private_key
+      host        = self.public_ip
+      timeout     = local.conn_ssh_timeout
+    }
+  }
+
+  provisioner "file" { # k8s nodes list
+    content     = local.haproxy_ip_addresses
+    destination = join("/", [ local.etc_iron_dir, "haproxy_ip_addresses.txt"])
 
     connection {
       type        = local.conn_type
@@ -118,7 +134,7 @@ resource "aws_instance" "ec2_ansible" {
 
   provisioner "file" { # ansible playbooks
     source      = var.playbook_dir    #, join("/", [ "kube_install_nodes.yml"])
-    destination = local.playbooks_dir # join("/", [, "kube_install_nodes.yml"])
+    destination = local.playbook_dir # join("/", [, "kube_install_nodes.yml"])
 
     connection {
       type        = local.conn_type
@@ -180,8 +196,10 @@ resource "aws_instance" "ec2_ansible" {
       "sudo apt install net-tools",
       "sudo ln -s /snap/k9s/current/bin/k9s /usr/local/bin/k9s",
       "echo \"# $(date)\" > ~/.ssh/known_hosts",
-      "# ssh-keyscan -H -p 22 -f ~/k8s_nodes.txt >> ~/.ssh/known_hosts",
-      "# ssh-keyscan -H -p 22 -f ~/haproxy_nodes.txt >> ~/.ssh/known_hosts",
+      # "while IFS= read -r hostname; do dig +short -4 $hostname || true; done < /etc/iron/k8s_nodes.txt >> /etc/iron/k8s_ip_addresses.txt",
+      # "ssh-keyscan -H -p 22 -f /etc/iron/k8s_nodes.txt >> ~/.ssh/known_hosts",
+      # "ssh-keyscan -H -p 22 -f /etc/iron/haproxy_nodes.txt >> ~/.ssh/known_hosts",
+      # "sudo chown -R root /etc/iron",
     ]
 
     connection {
