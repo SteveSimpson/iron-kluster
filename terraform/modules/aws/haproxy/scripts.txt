@@ -1,0 +1,2 @@
+source /etc/iron_haproxy/tf_values.sh
+cp /mnt/iron_haproxy/${HAPROXY_INSTANCE_INDEX}/keepalived.conf /etc/keepalived/keepalived.conf

@@ -1,0 +1,192 @@
+---
+- name: Setup HA Proxy Load Balancers
+  hosts: haproxy_nodes
+  become: yes
+  tasks:
+    - name: Retrieve instance index from remote system
+      ansible.builtin.slurp:
+        src: /etc/iron_haproxy/facts/haproxy_index
+      register: slurped_index
+
+    - name: Add BIRD PPA repository
+      apt_repository:
+        repo: ppa:cz.nic-labs/bird
+        state: present
+
+    - name: Update apt package index
+      apt:
+        update_cache: yes
+
+    - name: Install required packages for HA Proxy and AWS CLI
+      apt:
+        name:
+          - bird
+          - curl
+          - haproxy
+          - keepalived
+          - net-tools
+          - python3
+          - s3fs # also in haproxy_ec2.tf
+          - unzip
+        state: present
+
+    # TODO - find a better way to monitor haproxy process without root
+    # - name: Create script user for keepalived
+    #   ansible.builtin.user:
+    #     name: keepalived_script
+    #     state: present
+    #     system: yes
+    #     create_home: yes
+    #     shell: /usr/sbin/nologin
+    #     password: "{{ lookup('ansible.builtin.password', '/dev/null', length=24, chars=['ascii_lowercase', 'ascii_uppercase', 'digits', 'special']) | password_hash('sha512') }}"
+    #     update_password: always # This account should only be used by the service - not logging in, so rotating password on each run is fine
+
+    - name: Download AWS CLI installer
+      get_url:
+        url: "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip"
+        dest: "/tmp/awscliv2.zip"
+
+    - name: Unzip AWS CLI installer
+      unarchive:
+        src: "/tmp/awscliv2.zip"
+        dest: "/tmp"
+        remote_src: yes # Indicates the source file is on the remote host
+
+    - name: Run AWS CLI installer
+      command: "/tmp/aws/install"
+      args:
+        creates: "/usr/local/bin/aws"  # Prevents re-running if already installed
+
+    - name: Verify AWS CLI installation
+      command: "aws --version"
+      register: aws_cli_version
+
+    - name: Display AWS CLI version
+      debug:
+        msg: "{{ aws_cli_version.stdout }}"
+
+    - name: Deploy HAProxy configuration file
+      ansible.builtin.template:
+        src: templates/haproxy.cfg.j2  # Path to your Jinja2 template
+        dest: /etc/haproxy/haproxy.cfg
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart HAProxy
+
+    - name: Enable IPv4 forwarding
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        sysctl_set: true
+        state: present
+        reload: true
+
+    - name: Set IPv4 nonlocal bind
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_nonlocal_bind
+        value: '1'
+        sysctl_set: true
+        state: present
+        reload: true
+
+    - name: Deploy keepalived configuration file
+      ansible.builtin.copy:
+        remote_src: true
+        src: "/mnt/iron_haproxy/{{ slurped_index.content | b64decode | trim }}/keepalived.conf"  # from haproxy_s3.tf
+        dest: /etc/keepalived/keepalived.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart keepalived
+
+    - name: Deploy keepalived attach eip script
+      ansible.builtin.copy:
+        remote_src: true
+        src: "/mnt/iron_haproxy/{{ slurped_index.content | b64decode | trim }}/attach_eip.sh"  # from haproxy_s3.tf
+        dest: /etc/keepalived/attach_eip.sh
+        owner: root
+        group: root
+        mode: '0755'
+      notify: Restart keepalived
+
+    - name: Ensure keepalived service is enabled and running
+      ansible.builtin.systemd:
+        name: keepalived
+        state: started
+        enabled: true
+
+    - name: Ensure HAProxy service is disabled
+      ansible.builtin.systemd:
+        name: haproxy
+        state: stopped
+        enabled: false
+
+    # Need version 1.11 to match haproxy version 2.8 which is in Ubuntu 22.04 LTS
+    # RE: https://www.haproxy.com/documentation/kubernetes-ingress/community/installation/external-mode-on-premises/
+    # TODO: Veriify that the this actually does the tar xvzf correctly
+    - name: Download haproxy-ingress binary
+      ansible.builtin.get_url:
+        url: https://github.com/haproxytech/kubernetes-ingress/releases/download/v1.11.11/haproxy-ingress-controller_1.11.11_Linux_arm64.tar.gz
+        dest: /usr/local/bin/haproxy-ingress-controller
+        mode: '0755'
+        decompress: true
+
+    # Call the setcap command to allow HAProxy to bind to ports 80 and 443:
+    - name: Allow HAProxy to service web ports
+      ansible.builtin.command: /usr/bin/setcap cap_net_bind_service=+ep /usr/sbin/haproxy > /etc/iron_haproxy/haproxy_setcap.log 2>&1
+      args:
+        creates: /etc/iron_haproxy/haproxy_setcap.log
+
+    - name: Deploy HAProxy Ingress Service file
+      ansible.builtin.template:
+        src: templates/haproxy-ingress.service.j2
+        dest: /lib/systemd/system/haproxy-ingress.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify:
+        - Reload systemd 
+        - Restart HAProxy
+
+    - name: Ensure HAProxy Ingress service is enabled and running
+      ansible.builtin.systemd:
+        name: haproxy-ingress
+        state: started
+        enabled: true
+
+    - name: Read K8s Node IP addresses file
+      set_fact:
+        k8s_ip_list: "{{ lookup('file', '/etc/iron/k8s_ip_addresses.txt').splitlines() }}"
+
+    - name: Deploy Bird configuration file
+      ansible.builtin.template:
+        src: templates/bird.conf.j2  # Path to your Jinja2 template
+        dest: /etc/bird/bird.conf
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart bird
+
+    - name: Ensure bird service is enabled and running
+      ansible.builtin.systemd:
+        name: bird
+        state: started
+        enabled: true
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: yes
+    - name: Restart HAProxy
+      ansible.builtin.systemd:
+        name: haproxy-ingress
+        state: restarted
+    - name: Restart keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        state: restarted
+    - name: Restart bird
+      ansible.builtin.systemd:
+        name: bird
+        state: restarted

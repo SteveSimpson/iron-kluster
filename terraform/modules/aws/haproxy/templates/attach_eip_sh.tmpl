@@ -1,0 +1,11 @@
+#!/bin/bash
+AWS_REGION="${aws_region}"  
+EIP_ALLOC_ID="${eip_allocation_id}"
+INTERFACE_ID="${interface_id}"
+
+# RETURN=$(/usr/local/bin/aws ec2 associate-address --allocation-id $EIP_ALLOC_ID --network-interface-id $INTERFACE_ID --region $AWS_REGION)
+RETURN=$(/usr/local/bin/aws ec2 associate-address --allocation-id $EIP_ALLOC_ID --instance-id $INTERFACE_ID --region $AWS_REGION)
+RETVAL=$?
+RETURN_NO_NEWLINE="$${RETURN//\\n/}"
+
+/usr/bin/logger -t keepalived-attach-eip "Associated EIP $EIP_ALLOC_ID to interface $INTERFACE_ID: $RETVAL, $RETURN_NO_NEWLINE"

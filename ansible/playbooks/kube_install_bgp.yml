@@ -1,0 +1,51 @@
+# Configure Calico BGP settings using the first control plane node
+---
+- name: Configure Join Commands on Master Node
+  hosts: kube_control_plane[0] # Target the first control plane node
+  become: yes
+  tasks:
+    - name: Download calicoctl binary
+      ansible.builtin.get_url:
+        url: https://github.com/projectcalico/calico/releases/download/v3.31.0/calicoctl-linux-amd64
+        dest: /usr/local/bin/calicoctl
+        mode: '0755'
+
+    - name: Configure calicoctl
+      ansible.builtin.copy:
+        dest: /etc/calico/calicoctl.cfg
+        content: |
+          apiVersion: projectcalico.org/v3
+          kind: CalicoAPIConfig
+          metadata:
+          spec:
+            datastoreType: "kubernetes"
+            kubeconfig: "/etc/kubernetes/admin.conf"
+        mode: '0644'
+        owner: root
+        group: root
+
+    - name: Read HAProxy IP addresses file
+      set_fact:
+        haproxy_ip_list: "{{ lookup('file', '/etc/iron/haproxy_ip_addresses.txt').splitlines() }}"
+
+    - name: Deploy BGP configuration file
+      ansible.builtin.template:
+        src: templates/calico-bgp.yaml.j2  # Path to your Jinja2 template
+        dest: /etc/calico/calico-bgp.yaml
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Apply BGP configuration using calicoctl
+      ansible.builtin.command:
+        cmd: /usr/local/bin/calicoctl apply -f /etc/calico/calico-bgp.yaml --config=/etc/calico/calicoctl.cfg
+
+    - name: Create an empty configmap for ingress controller
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: haproxy-kubernetes-ingress
+            namespace: default
